@@ -116,14 +116,16 @@ def cmd_build(args):
 
 
 def cmd_generate(args):
-    """Chế độ tự động hoàn toàn — cần ANTHROPIC_API_KEY."""
+    """Chế độ tự động hoàn toàn — cần API key của provider đã chọn."""
     from mcq_generator import GenerationError, generate_mcq_set
 
     raw_scenario = _read_text_arg_or_stdin(args.input, "tình huống lâm sàng thô")
 
-    print(f"Đang gọi API để sinh {len(DEFAULT_BLUEPRINT)} câu hỏi...")
+    print(f"Đang gọi {args.provider} để sinh {len(DEFAULT_BLUEPRINT)} câu hỏi...")
     try:
-        questions = generate_mcq_set(raw_scenario, model=args.model)
+        questions = generate_mcq_set(
+            raw_scenario, provider=args.provider, model=args.model
+        )
     except GenerationError as exc:
         print(f"Lỗi: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
@@ -180,13 +182,14 @@ def main():
 
     p_generate = sub.add_parser(
         "generate",
-        help="[Cần ANTHROPIC_API_KEY] Sinh + kiểm tra + xuất .docx tự động, chỉ 1 lệnh",
+        help="[Cần API key] Sinh + kiểm tra + xuất .docx tự động, chỉ 1 lệnh",
     )
     p_generate.add_argument("--input", "-i", help="File .txt chứa tình huống thô. Bỏ qua để đọc từ stdin.")
     p_generate.add_argument("--output", "-o", default="output/bo_cau_hoi.docx", help="File .docx đầu ra.")
     p_generate.add_argument("--json-output", help="Lưu thêm bản JSON thô tại đây (tuỳ chọn).")
     p_generate.add_argument("--title", default="Tình huống lâm sàng", help="Tiêu đề phụ trong file Word.")
-    p_generate.add_argument("--model", default="claude-sonnet-4-6", help="Model Claude dùng để sinh câu hỏi.")
+    p_generate.add_argument("--provider", default="gemini", choices=["gemini", "anthropic"], help="Nhà cung cấp AI (mặc định: gemini).")
+    p_generate.add_argument("--model", default=None, help="Tên model cụ thể (mặc định theo provider).")
     p_generate.set_defaults(func=cmd_generate)
 
     args = parser.parse_args()

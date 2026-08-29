@@ -1,16 +1,19 @@
 """
 generator.py
 -------------
-Gọi Anthropic API (Claude) để sinh bộ câu hỏi MCQ từ 1 tình huống lâm sàng
-thô, dựa trên prompts.py và competency_framework.py.
+Gọi một LLM (mặc định Gemini, có thể đổi sang Anthropic) để sinh bộ câu
+hỏi MCQ từ 1 tình huống lâm sàng thô, dựa trên prompts.py và
+competency_framework.py. Việc gọi model thực tế nằm ở providers.py —
+file này chỉ lo build prompt, gọi providers.call_llm(), rồi parse JSON.
 
 Cách dùng cơ bản:
 
     from mcq_generator.generator import generate_mcq_set
 
-    questions = generate_mcq_set(raw_scenario="....")
+    questions = generate_mcq_set(raw_scenario="....")  # dùng Gemini mặc định
 
-Yêu cầu biến môi trường ANTHROPIC_API_KEY (xem README.md / .env.example).
+Yêu cầu biến môi trường GEMINI_API_KEY (hoặc ANTHROPIC_API_KEY nếu dùng
+provider="anthropic") — xem README.md / .env.example.
 """
 
 from __future__ import annotations
@@ -20,8 +23,9 @@ import os
 
 from .competency_framework import DEFAULT_BLUEPRINT, ThinkingLevel
 from .prompts import build_system_prompt, build_user_prompt
+from .providers import ProviderError, call_llm
 
-DEFAULT_MODEL = "claude-sonnet-4-6"
+DEFAULT_PROVIDER = "gemini"
 
 
 class GenerationError(RuntimeError):
@@ -33,7 +37,6 @@ def _extract_json_array(raw_text: str) -> list[dict]:
     model lỡ bọc thêm ```json ... ``` hoặc thêm vài dòng giải thích."""
     text = raw_text.strip()
     if text.startswith("```"):
-        # bỏ dòng ``` đầu và ``` cuối (có thể kèm "json")
         lines = text.splitlines()
         if lines and lines[0].startswith("```"):
             lines = lines[1:]
@@ -60,10 +63,32 @@ def _extract_json_array(raw_text: str) -> list[dict]:
     return data
 
 
+def _resolve_api_key(provider: str, api_key: str | None) -> str:
+    if api_key:
+        return api_key
+
+    env_var = "GEMINI_API_KEY" if provider == "gemini" else "ANTHROPIC_API_KEY"
+    key = os.environ.get(env_var)
+    if key:
+        return key
+
+    # fallback: key đã lưu cục bộ qua app giao diện (config.py)
+    from .config import load_api_key
+    key = load_api_key(provider)
+    if key:
+        return key
+
+    raise GenerationError(
+        f"Chưa có API key cho provider={provider!r}. Đặt biến môi trường "
+        f"{env_var} hoặc truyền api_key= khi gọi generate_mcq_set()."
+    )
+
+
 def generate_mcq_set(
     raw_scenario: str,
     blueprint: list[tuple[str, ThinkingLevel]] | None = None,
-    model: str = DEFAULT_MODEL,
+    provider: str = DEFAULT_PROVIDER,
+    model: str | None = None,
     max_tokens: int = 8000,
     api_key: str | None = None,
 ) -> list[dict]:
@@ -74,49 +99,41 @@ def generate_mcq_set(
     raw_scenario:
         Văn bản tình huống lâm sàng thô do người dùng cung cấp.
     blueprint:
-        Danh sách (mã năng lực, mức độ tư duy) cho từng câu, theo đúng thứ
-        tự mong muốn. Mặc định dùng DEFAULT_BLUEPRINT (10 câu, bao phủ
-        chẩn đoán / cận lâm sàng / điều trị / tiên lượng / dự phòng...).
+        Danh sách (mã năng lực, mức độ tư duy) cho từng câu. Mặc định
+        dùng DEFAULT_BLUEPRINT (10 câu).
+    provider:
+        "gemini" (mặc định) hoặc "anthropic".
     model:
-        Tên model Claude dùng để sinh câu hỏi.
+        Tên model cụ thể. Nếu bỏ trống, dùng model mặc định của provider
+        (xem providers.DEFAULT_MODEL_BY_PROVIDER).
     max_tokens:
-        Giới hạn token đầu ra — 10 câu hỏi kèm bảng kiểm tự chấm thường
-        cần khá nhiều token, tăng nếu bị cắt giữa chừng.
+        Giới hạn token đầu ra — tăng nếu bị cắt giữa chừng.
     api_key:
-        Nếu không truyền, sẽ lấy từ biến môi trường ANTHROPIC_API_KEY.
+        Nếu không truyền, tự tìm theo thứ tự: biến môi trường
+        (GEMINI_API_KEY / ANTHROPIC_API_KEY) → key đã lưu cục bộ qua app
+        giao diện (config.py).
     """
-    try:
-        import anthropic
-    except ImportError as exc:
-        raise GenerationError(
-            "Thiếu thư viện 'anthropic'. Cài bằng: pip install anthropic"
-        ) from exc
-
     if not raw_scenario or not raw_scenario.strip():
         raise ValueError("raw_scenario không được để trống.")
 
     blueprint = blueprint or DEFAULT_BLUEPRINT
-    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-    if not key:
-        raise GenerationError(
-            "Chưa có ANTHROPIC_API_KEY. Đặt biến môi trường hoặc truyền "
-            "api_key= khi gọi generate_mcq_set()."
-        )
+    key = _resolve_api_key(provider, api_key)
 
-    client = anthropic.Anthropic(api_key=key)
     system_prompt = build_system_prompt(n_questions=len(blueprint))
     user_prompt = build_user_prompt(raw_scenario, blueprint)
 
-    response = client.messages.create(
-        model=model,
-        max_tokens=max_tokens,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_prompt}],
-    )
+    try:
+        raw_text = call_llm(
+            provider=provider,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=model,
+            api_key=key,
+            max_tokens=max_tokens,
+        )
+    except ProviderError as exc:
+        raise GenerationError(str(exc)) from exc
 
-    raw_text = "".join(
-        block.text for block in response.content if block.type == "text"
-    )
     questions = _extract_json_array(raw_text)
 
     # Đảm bảo question_number đúng thứ tự 1..n dù model có đánh số sai.
