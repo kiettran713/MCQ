@@ -80,7 +80,7 @@ ai. Nếu lỡ để lộ key (kể cả dán vào đây để hỏi trợ lý A
 tạo key và **xoá/thu hồi key đó, tạo key mới** ngay lập tức.
 
 **Chi phí và giới hạn miễn phí (free tier):** mặc định app dùng
-`gemini-2.5-flash`, model có hạn mức dùng miễn phí khá rộng rãi (không
+`gemini-3.6-flash`, model có hạn mức dùng miễn phí khá rộng rãi (không
 cần thẻ thanh toán). Các model dòng **Pro** (`gemini-2.5-pro`,
 `gemini-3.1-pro-preview`) chất lượng cao hơn nhưng hạn mức miễn phí rất
 thấp hoặc bằng 0 — nếu dùng sẽ báo lỗi `429 RESOURCE_EXHAUSTED` trừ khi
@@ -359,6 +359,7 @@ Bộ khung mặc định khi không dùng `build_blueprint` (ví dụ khi gọi 
 
 ```
 clinical-mcq-generator/
+├── .claude/skills/clinical-mcq-writer/  # SKILL cho Claude Code/Claude.ai — Claude tự soạn câu hỏi trực tiếp, không cần API key riêng (xem README trong thư mục này)
 ├── gui_app.py                       # ỨNG DỤNG GIAO DIỆN — hỗ trợ cả API tự động lẫn chế độ thủ công (dán vào Claude.ai/Gemini/ChatGPT)
 ├── run_windows.bat / run_mac.command  # file double-click để mở app
 ├── cli.py                           # công cụ dòng lệnh: prepare / build / generate
@@ -380,6 +381,13 @@ clinical-mcq-generator/
 └── tests/
     └── test_pipeline_offline.py    # test validator + docx export, KHÔNG gọi API thật
 ```
+
+### Dùng qua Claude Code thay vì app Python
+
+Nếu bạn mở repo này bằng **Claude Code**, không cần chạy `gui_app.py`
+hay lo API key — Claude sẽ tự đọc skill ở `.claude/skills/clinical-mcq-writer/`
+và tự soạn câu hỏi trực tiếp khi bạn yêu cầu. Xem chi tiết trong
+`.claude/skills/clinical-mcq-writer/README.md`.
 
 ## Chạy test (không tốn API call)
 
